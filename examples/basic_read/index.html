@@ -33,14 +33,14 @@
 						for (let qs of ql.strokes) {
 							qs.brushSize *= 15;
 							for (let p of qs.positions) {
-								p.mult(10);
+								p.mult(100);
 							}
 						}
 						firstRun = false;
 					}
 
 					push();
-					translate(-80, 120, 300);
+					translate(0, 10, 300);
 					rotateX(radians(90));
 					rotateY(radians(90));
 					rotateZ(radians(90));

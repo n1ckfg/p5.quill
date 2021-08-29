@@ -58,10 +58,10 @@ class QuillLoader {
                     });
 
 					// A tilt zipfile should contain three items: thumbnail.png, data.sketch, metadata.json
-                    zip.file("metadata.json").async("string").then(function(response) {
+                    zip.file("Quill.json").async("string").then(function(response) {
                         ql.json = JSON.parse(response);
 
-	                    zip.file("data.sketch").async("arraybuffer").then(function(response) {
+	                    zip.file("Quill.qbin").async("arraybuffer").then(function(response) {
 	                        ql.bytes = new Uint8Array(response);
 	                        ql.parse();
 	                        //console.log("read " + ql.bytes.length + " bytes");
@@ -74,62 +74,72 @@ class QuillLoader {
 	    return ql;
     }
 
-	// https://docs.google.com/document/d/11ZsHozYn9FnWG7y3s3WAyKIACfbfwb4PbaS8cZ_xjvo/edit#
 	parse() {
 		const data = new DataView(this.bytes.buffer);
 
-		this.numStrokes = data.getInt32(16, true);
+		const children = this.json["Sequence"]["RootLayer"]["Implementation"]["Children"];
 
-		let offset = 20;
+		for (let i=0; i < children.length; i++) {
+  			const childNode = children[i];
 
-		for (let i = 0; i < this.numStrokes; i++) {
-			const brushIndex = data.getInt32(offset, true);
-
-			let r = data.getFloat32(offset + 4, true) * 255;
-			let g = data.getFloat32(offset + 8, true) * 255;
-			let b = data.getFloat32(offset + 12, true) * 255;
-			let a = data.getFloat32(offset + 16, true) * 255;
-
-			const brushColor = color(r, g, b, a);
-
-			const brushSize = data.getFloat32(offset + 20, true);
-			const strokeMask = data.getUint32(offset + 24, true);
-			const controlPointMask = data.getUint32(offset + 28, true);
-
-			let offsetStrokeMask = 0;
-			let offsetControlPointMask = 0;
-
-			for (let j = 0; j < 4; j++) {
-				const byte = 1 << j;
-				if ((strokeMask & byte) > 0) offsetStrokeMask += 4;
-				if ((controlPointMask & byte) > 0) offsetControlPointMask += 4;
+			// skip the child node if it contains no drawings
+			let drawingCount = 0;
+			try {
+				drawingCount = childNode["Implementation"]["Drawings"].length;
+			} catch (e) { 
+				continue;
 			}
 
-			offset += 28 + offsetStrokeMask + 4; 
+			for (let j=0; j < drawingCount; j++) {
+				const drawingNode  = childNode["Implementation"]["Drawings"][j];
 
-			const numControlPoints = data.getInt32(offset, true);
+				const dataFileOffsetString = drawingNode["DataFileOffset"];
 
-			let positions = []; //new Float32Array(numControlPoints * 3);
-			//let quaternions = []; //new Float32Array(numControlPoints * 4);
+				const dataFileOffset = parseInt("0x" + dataFileOffsetString);
 
-			offset += 4;
+				const numNodeStrokes = data.getInt32(dataFileOffset, true);
+				this.numStrokes += numNodeStrokes;
 
-			for (let j = 0; j < numControlPoints; j++) {
-				let x = data.getFloat32(offset + 0, true);
-				let y = data.getFloat32(offset + 4, true);
-				let z = data.getFloat32(offset + 8, true);
-				positions.push(createVector(x, y, z));
+				let offset = dataFileOffset + 4;
 
-				//qw = data.getFloat32(offset + 12, true);
-				//qx = data.getFloat32(offset + 16, true);
-				//qy = data.getFloat32(offset + 20, true);
-				//qz = data.getFloat32(offset + 24, true);
+				for (let k = 0; k < numNodeStrokes; k++) {
+					offset += 36;
+					
+					const numVertices = data.getInt32(offset, true);
 
-				offset += 28 + offsetControlPointMask; 
+					const positions = [];
+					const colors = [];
+					const widths = [];
+
+					offset += 4;
+
+					for (let l = 0; l < numVertices; l++) {
+						const x = data.getFloat32(offset + 0, true); // x
+						const y = data.getFloat32(offset + 4, true); // y
+						const z = data.getFloat32(offset + 8, true); // z
+						positions.push(createVector(x, y, z));
+
+						offset += 36;
+
+						const r = data.getFloat32(offset + 0, true) * 255; // r
+						const g = data.getFloat32(offset + 4, true) * 255; // g
+						const b = data.getFloat32(offset + 8, true) * 255; // b
+						const a = data.getFloat32(offset + 12, true) * 255; // a
+						colors.push(color(r, g, b, a));
+
+						offset += 16;
+
+						widths.push(data.getFloat32(offset + 0, true));
+
+						offset += 4;
+					}
+					
+					const brushSize = widths[parseInt(widths.length/2)];
+					const brushColor = colors[parseInt(colors.length/2)];
+					const quillStroke = new QuillStroke(positions, brushSize, brushColor);
+					this.strokes.push(quillStroke);
+				}
 			}
-
-			let quillStroke = new QuillStroke(positions, brushSize, brushColor);
-			this.strokes.push(quillStroke);
 		}
 	}
 
